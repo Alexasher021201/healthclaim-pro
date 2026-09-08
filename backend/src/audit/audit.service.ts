@@ -1,12 +1,20 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuditTrailTemplate, AuditContext } from './templates/audit-trail.template';
+import { PrismaAuditTrailTemplate } from './templates/prisma-audit-trail.template';
+
+export { AuditTrailTemplate, AuditContext, PrismaAuditTrailTemplate };
 
 @Injectable()
 export class AuditService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly auditTemplate: PrismaAuditTrailTemplate;
+
+  constructor(private readonly prisma: PrismaService) {
+    this.auditTemplate = new PrismaAuditTrailTemplate(this.prisma);
+  }
 
   /**
-   * Record structured audit log
+   * Record structured audit log via GoF Template Method pattern
    */
   async log(entry: {
     actorId?: string;
@@ -17,16 +25,32 @@ export class AuditService {
     ipAddress?: string;
     userAgent?: string;
   }) {
-    return this.prisma.auditLog.create({
-      data: {
-        actorId: entry.actorId,
-        action: entry.action,
-        targetResource: entry.targetResource,
-        targetResourceId: entry.targetResourceId,
-        details: entry.details,
-        ipAddress: entry.ipAddress,
-        userAgent: entry.userAgent,
-      },
+    return this.auditTemplate.execute(entry);
+  }
+
+  /**
+   * Academic OOAD method specification:
+   * recordLog(userId, action, resourceType, resourceId, oldValues, newValues, ipAddress, userAgent)
+   */
+  async recordLog(
+    userId?: string,
+    action: string = 'UNKNOWN',
+    resourceType: string = 'SYSTEM',
+    resourceId?: string,
+    oldValues?: any,
+    newValues?: any,
+    ipAddress?: string,
+    userAgent?: string,
+  ) {
+    return this.auditTemplate.execute({
+      actorId: userId,
+      action,
+      targetResource: resourceType,
+      targetResourceId: resourceId,
+      oldValues,
+      newValues,
+      ipAddress,
+      userAgent,
     });
   }
 
@@ -138,3 +162,6 @@ export class AuditService {
     return csvContent;
   }
 }
+
+export { AuditService as AuditLogService };
+

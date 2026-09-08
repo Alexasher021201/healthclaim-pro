@@ -41,3 +41,4 @@ backend/uploads/
 /storage/
 minio_data/
 postgres_data/
+/doc/

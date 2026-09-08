@@ -1,6 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { StorageService } from '../src/storage/storage.service';
+import {
+  StorageService,
+  LocalStorageFallbackAdapter,
+  EncryptedStorageDecorator,
+} from '../src/storage/storage.service';
 import * as fs from 'fs';
+import * as path from 'path';
 
 describe('StorageService (Dual-Key Envelope Encryption & Magic Byte Verification)', () => {
   let service: StorageService;
@@ -106,3 +111,56 @@ describe('StorageService (Dual-Key Envelope Encryption & Magic Byte Verification
     ).rejects.toThrow();
   });
 });
+
+describe('GoF Patterns: Adapter & Decorator Pattern', () => {
+  it('LocalStorageFallbackAdapter should persist and retrieve raw files to disk', async () => {
+    const testDir = path.resolve(process.cwd(), 'uploads', 'test-adapter');
+    const adapter = new LocalStorageFallbackAdapter(testDir);
+    const testKey = 'test-file.txt';
+    const testBuffer = Buffer.from('hello world from adapter');
+
+    await adapter.storeFile(testBuffer, testKey);
+    expect(adapter.hasFile(testKey)).toBe(true);
+
+    const retrieved = await adapter.retrieveFile(testKey);
+    expect(retrieved.toString('utf8')).toBe('hello world from adapter');
+
+    await adapter.deleteFile(testKey);
+    expect(adapter.hasFile(testKey)).toBe(false);
+
+    if (fs.existsSync(testDir)) {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
+  it('EncryptedStorageDecorator should transparently encrypt payloads before delegating to adapter', async () => {
+    const testDir = path.resolve(process.cwd(), 'uploads', 'test-decorator');
+    const adapter = new LocalStorageFallbackAdapter(testDir);
+    const decorator = new EncryptedStorageDecorator(adapter);
+
+    const plainText = '%PDF-1.4 encrypted invoice receipt sample';
+    const plainBuffer = Buffer.from(plainText, 'utf8');
+
+    const result = await decorator.encryptAndStore(plainBuffer, 'receipt.pdf', 'application/pdf');
+    expect(result.storageKey).toBeDefined();
+
+    // Verify raw content on disk is actually encrypted (contains HC_ENC and ciphertext, not plain text)
+    const storedRaw = await adapter.retrieveFile(result.storageKey);
+    expect(storedRaw.toString('utf8')).not.toContain('encrypted invoice receipt sample');
+    expect(storedRaw.subarray(0, 6).toString('utf8')).toBe('HC_ENC');
+
+    // Verify decorator decrypts cleanly
+    const decrypted = await decorator.retrieveAndDecrypt(
+      result.storageKey,
+      result.encryptedDek,
+      result.checksum,
+    );
+    expect(decrypted.toString('utf8')).toBe(plainText);
+
+    await decorator.deleteFile(result.storageKey);
+    if (fs.existsSync(testDir)) {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+});
+

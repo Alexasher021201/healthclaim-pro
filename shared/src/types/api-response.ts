@@ -2,6 +2,7 @@
  * Standard Unified API Response Envelope
  */
 export interface ApiResponse<T = any> {
+  statusCode?: number;
   success: boolean;
   message?: string;
   data: T;

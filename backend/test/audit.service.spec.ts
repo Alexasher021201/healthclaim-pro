@@ -103,4 +103,38 @@ describe('AuditService (TDD)', () => {
     expect(csvOutput).toContain('david@healthclaim.pro');
     expect(csvOutput).toContain('192.168.1.1');
   });
+
+  it('should support recordLog() executing through AuditTrailTemplate with before/after diff serialization', async () => {
+    mockPrismaService.auditLog.create.mockImplementation(({ data }) => Promise.resolve({ id: 'log-diff', ...data }));
+
+    const result = await auditService.recordLog(
+      'admin-99',
+      'CHANGE_POLICY_LIMIT',
+      'POLICY',
+      'pol-1',
+      { annualLimit: 5000 },
+      { annualLimit: 10000 },
+      '10.0.0.1',
+      'AuditAgent/1.0',
+    );
+
+    expect(result).toBeDefined();
+    expect(mockPrismaService.auditLog.create).toHaveBeenCalledWith({
+      data: {
+        actorId: 'admin-99',
+        action: 'CHANGE_POLICY_LIMIT',
+        targetResource: 'POLICY',
+        targetResourceId: 'pol-1',
+        details: {
+          diff: {
+            before: { annualLimit: 5000 },
+            after: { annualLimit: 10000 },
+          },
+        },
+        ipAddress: '10.0.0.1',
+        userAgent: 'AuditAgent/1.0',
+      },
+    });
+  });
 });
+

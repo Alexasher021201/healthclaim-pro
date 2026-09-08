@@ -71,4 +71,27 @@ export class ActuarialService {
       breakdownByItem: resultContext.state.itemBreakdown,
     };
   }
+
+  /**
+   * Academic OOAD specification alias: calculateReimbursement
+   */
+  calculateReimbursement(
+    claimCategory: ClaimCategory,
+    items: ActuarialItemInput[],
+    benefitTier: {
+      name: string;
+      code: string;
+      annualLimit: number;
+      defaultDeductible: number;
+      defaultCoPayRate: number;
+    },
+    userQuota: {
+      remainingBalance: number;
+      annualLimit: number;
+      cumulativeDeductibleSpent: number;
+    },
+  ): ActuarialCalculationPreviewDto {
+    return this.calculate(claimCategory, items, benefitTier, userQuota);
+  }
 }
+

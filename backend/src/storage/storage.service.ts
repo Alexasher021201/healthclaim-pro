@@ -2,32 +2,27 @@ import {
   Injectable,
   Logger,
   BadRequestException,
-  InternalServerErrorException,
   OnModuleInit,
 } from '@nestjs/common';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
+import { S3Client } from '@aws-sdk/client-s3';
+import { IStorageService, StoragePutOptions } from './interfaces/storage-service.interface';
+import { S3BucketStorageAdapter } from './adapters/s3-bucket-storage.adapter';
+import { LocalStorageFallbackAdapter } from './adapters/local-storage-fallback.adapter';
 import {
-  S3Client,
-  PutObjectCommand,
-  GetObjectCommand,
-  DeleteObjectCommand,
-  HeadBucketCommand,
-  CreateBucketCommand,
-} from '@aws-sdk/client-s3';
+  EncryptedStorageDecorator,
+  EncryptionResult,
+} from './decorators/encrypted-storage.decorator';
 
-export interface EncryptionResult {
-  storageKey: string;
-  encryptedDek: string;
-  iv: string;
-  authTag: string;
-  checksum: string;
-  magicHeader: string;
-}
+export { IStorageService, StoragePutOptions };
+export { S3BucketStorageAdapter };
+export { LocalStorageFallbackAdapter };
+export { EncryptedStorageDecorator, EncryptionResult };
 
 @Injectable()
-export class StorageService implements OnModuleInit {
+export class StorageService implements IStorageService, OnModuleInit {
   private readonly logger = new Logger(StorageService.name);
   private readonly storageDir: string;
   private readonly masterKey: Buffer;
@@ -36,6 +31,10 @@ export class StorageService implements OnModuleInit {
   private readonly s3Client: S3Client;
   private readonly bucketName: string;
   private isS3Available = false;
+
+  private readonly s3Adapter: S3BucketStorageAdapter;
+  private readonly fallbackAdapter: LocalStorageFallbackAdapter;
+  private readonly encryptedDecorator: EncryptedStorageDecorator;
 
   constructor() {
     this.storageDir = path.resolve(process.cwd(), 'uploads', 'receipts');
@@ -64,6 +63,15 @@ export class StorageService implements OnModuleInit {
       },
       forcePathStyle: true,
     });
+
+    // Wire GoF Adapter & Decorator patterns
+    this.s3Adapter = new S3BucketStorageAdapter(this.s3Client, this.bucketName);
+    this.fallbackAdapter = new LocalStorageFallbackAdapter(this.storageDir);
+    this.encryptedDecorator = new EncryptedStorageDecorator(
+      this.s3Adapter,
+      this.fallbackAdapter,
+      this.masterKey,
+    );
   }
 
   async onModuleInit() {
@@ -74,21 +82,12 @@ export class StorageService implements OnModuleInit {
    * Initializes and ensures S3 / MinIO bucket exists
    */
   async initS3Bucket(): Promise<void> {
-    try {
-      await this.s3Client.send(new HeadBucketCommand({ Bucket: this.bucketName }));
-      this.isS3Available = true;
+    const success = await this.s3Adapter.initBucket();
+    this.isS3Available = success;
+    if (success) {
       this.logger.log(`Connected to S3 / MinIO bucket '${this.bucketName}' successfully.`);
-    } catch (err: any) {
-      try {
-        await this.s3Client.send(new CreateBucketCommand({ Bucket: this.bucketName }));
-        this.isS3Available = true;
-        this.logger.log(`Created S3 / MinIO bucket '${this.bucketName}' successfully.`);
-      } catch (createErr: any) {
-        this.logger.warn(
-          `MinIO S3 bucket initialization notice: ${createErr.message}. Local storage fallback active.`,
-        );
-        this.isS3Available = false;
-      }
+    } else {
+      this.logger.warn(`MinIO S3 bucket initialization notice. Local storage fallback active.`);
     }
   }
 
@@ -128,9 +127,22 @@ export class StorageService implements OnModuleInit {
   }
 
   /**
+   * Standard IStorageService persistence delegation
+   */
+  async storeFile(buffer: Buffer, storageKey: string, options?: StoragePutOptions): Promise<void> {
+    return this.encryptedDecorator.storeFile(buffer, storageKey, options);
+  }
+
+  /**
+   * Standard IStorageService retrieval delegation
+   */
+  async retrieveFile(storageKey: string): Promise<Buffer> {
+    return this.encryptedDecorator.retrieveFile(storageKey);
+  }
+
+  /**
    * Encrypt file buffer using Dual-Key Envelope Encryption (AES-256-GCM + KEK)
-   * Formats into a custom binary framed envelope and pushes to MinIO / S3 bucket:
-   * [ 6B "HC_ENC" ] [ 1B version 0x01 ] [ 12B IV ] [ 16B AuthTag ] [ Ciphertext ]
+   * Delegates through EncryptedStorageDecorator
    */
   async encryptAndStore(
     buffer: Buffer,
@@ -143,171 +155,25 @@ export class StorageService implements OnModuleInit {
       );
     }
 
-    // 1. Calculate SHA-256 integrity checksum over original plain bytes
-    const checksum = crypto.createHash('sha256').update(buffer).digest('hex');
-
-    // 2. Generate cryptographically random one-time Data Encryption Key (DEK) and IV
-    const dek = crypto.randomBytes(32); // AES-256 key
-    const iv = crypto.randomBytes(12);  // GCM recommended 96-bit IV
-
-    // 3. Encrypt payload with AES-256-GCM
-    const cipher = crypto.createCipheriv('aes-256-gcm', dek, iv);
-    const ciphertext = Buffer.concat([cipher.update(buffer), cipher.final()]);
-    const authTag = cipher.getAuthTag(); // 16 bytes authentication tag
-
-    // 4. Encrypt DEK with Master KEK (Key Encryption Key)
-    const kekIv = crypto.randomBytes(12);
-    const kekCipher = crypto.createCipheriv('aes-256-gcm', this.masterKey, kekIv);
-    const encryptedDekPayload = Buffer.concat([kekCipher.update(dek), kekCipher.final()]);
-    const kekAuthTag = kekCipher.getAuthTag();
-
-    // Composite encrypted DEK envelope string: kekIv:kekAuthTag:encryptedDek
-    const encryptedDek = `${kekIv.toString('hex')}:${kekAuthTag.toString('hex')}:${encryptedDekPayload.toString('hex')}`;
-
-    // 5. Build binary framed envelope
-    const headerBuffer = Buffer.from(this.magicHeader, 'utf8');
-    const versionBuffer = Buffer.from([0x01]);
-    const envelopeBuffer = Buffer.concat([
-      headerBuffer,
-      versionBuffer,
-      iv,
-      authTag,
-      ciphertext,
-    ]);
-
-    // 6. Write to S3 / MinIO Object Storage (and mirror local backup)
-    const datePrefix = new Date().toISOString().split('T')[0];
-    const uniqueKey = `${datePrefix}-${crypto.randomBytes(16).toString('hex')}.enc`;
-
-    try {
-      await this.s3Client.send(
-        new PutObjectCommand({
-          Bucket: this.bucketName,
-          Key: uniqueKey,
-          Body: envelopeBuffer,
-          ContentType: 'application/octet-stream',
-          Metadata: {
-            'original-filename': encodeURIComponent(originalFileName),
-            'checksum-sha256': checksum,
-            'encrypted-algorithm': 'AES-256-GCM',
-          },
-        }),
-      );
-      this.logger.log(
-        `Securely pushed encrypted receipt '${originalFileName}' [${buffer.length}B] -> MinIO Bucket '${this.bucketName}/${uniqueKey}'`,
-      );
-    } catch (s3Err: any) {
-      this.logger.warn(`MinIO S3 upload failed (${s3Err.message}). Writing to local storage directory fallback.`);
-      const fullPath = path.join(this.storageDir, uniqueKey);
-      await fs.promises.writeFile(fullPath, envelopeBuffer);
-    }
-
-    return {
-      storageKey: uniqueKey,
-      encryptedDek,
-      iv: iv.toString('hex'),
-      authTag: authTag.toString('hex'),
-      checksum,
-      magicHeader: this.magicHeader,
-    };
+    return this.encryptedDecorator.encryptAndStore(buffer, originalFileName, mimeType);
   }
 
   /**
    * Decrypt file payload on the fly in memory with integrity & GCM Auth Tag verification
+   * Delegates through EncryptedStorageDecorator
    */
   async retrieveAndDecrypt(
     storageKey: string,
     encryptedDekString: string,
     expectedChecksum?: string,
   ): Promise<Buffer> {
-    let envelopeBuffer: Buffer;
-
-    // 1. Fetch ciphertext envelope from MinIO S3 (or fallback to local disk)
-    try {
-      const s3Response = await this.s3Client.send(
-        new GetObjectCommand({
-          Bucket: this.bucketName,
-          Key: storageKey,
-        }),
-      );
-      const byteArray = await s3Response.Body?.transformToByteArray();
-      if (!byteArray) throw new Error('Empty S3 response stream');
-      envelopeBuffer = Buffer.from(byteArray);
-    } catch (s3Err: any) {
-      const fullPath = path.join(this.storageDir, storageKey);
-      if (fs.existsSync(fullPath)) {
-        envelopeBuffer = await fs.promises.readFile(fullPath);
-      } else {
-        throw new BadRequestException(`Encrypted storage object '${storageKey}' not found in S3 or local disk.`);
-      }
-    }
-
-    // 2. Validate envelope magic header
-    const headerLength = 6;
-    const magic = envelopeBuffer.subarray(0, headerLength).toString('utf8');
-    if (magic !== this.magicHeader) {
-      throw new InternalServerErrorException('Corrupted encryption envelope: invalid magic header.');
-    }
-
-    const version = envelopeBuffer[6];
-    if (version !== 0x01) {
-      throw new InternalServerErrorException(`Unsupported envelope encryption version: ${version}`);
-    }
-
-    const iv = envelopeBuffer.subarray(7, 19);
-    const authTag = envelopeBuffer.subarray(19, 35);
-    const ciphertext = envelopeBuffer.subarray(35);
-
-    // 3. Decrypt DEK using Master KEK
-    const [kekIvHex, kekAuthTagHex, encryptedDekHex] = encryptedDekString.split(':');
-    if (!kekIvHex || !kekAuthTagHex || !encryptedDekHex) {
-      throw new InternalServerErrorException('Malformed encrypted DEK envelope metadata.');
-    }
-
-    const kekIv = Buffer.from(kekIvHex, 'hex');
-    const kekAuthTag = Buffer.from(kekAuthTagHex, 'hex');
-    const encryptedDekPayload = Buffer.from(encryptedDekHex, 'hex');
-
-    const kekDecipher = crypto.createDecipheriv('aes-256-gcm', this.masterKey, kekIv);
-    kekDecipher.setAuthTag(kekAuthTag);
-    const dek = Buffer.concat([kekDecipher.update(encryptedDekPayload), kekDecipher.final()]);
-
-    // 4. Decrypt ciphertext using DEK
-    const decipher = crypto.createDecipheriv('aes-256-gcm', dek, iv);
-    decipher.setAuthTag(authTag);
-    const plainBuffer = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-
-    // 5. Verify integrity checksum if provided
-    if (expectedChecksum) {
-      const computedChecksum = crypto.createHash('sha256').update(plainBuffer).digest('hex');
-      if (computedChecksum !== expectedChecksum) {
-        throw new InternalServerErrorException(
-          'Integrity verification failed: decrypted payload SHA-256 checksum mismatch.',
-        );
-      }
-    }
-
-    return plainBuffer;
+    return this.encryptedDecorator.retrieveAndDecrypt(storageKey, encryptedDekString, expectedChecksum);
   }
 
   /**
    * Delete stored encrypted envelope from MinIO S3 and local storage
    */
   async deleteStoredFile(storageKey: string): Promise<void> {
-    try {
-      await this.s3Client.send(
-        new DeleteObjectCommand({
-          Bucket: this.bucketName,
-          Key: storageKey,
-        }),
-      );
-    } catch (err: any) {
-      this.logger.warn(`Could not delete from S3 bucket: ${err.message}`);
-    }
-
-    const fullPath = path.join(this.storageDir, storageKey);
-    if (fs.existsSync(fullPath)) {
-      await fs.promises.unlink(fullPath).catch(() => {});
-    }
+    return this.encryptedDecorator.deleteFile(storageKey);
   }
 }
