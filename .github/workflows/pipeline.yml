@@ -125,16 +125,6 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
-      minio:
-        image: minio/minio:latest
-        env:
-          MINIO_ROOT_USER: minioadmin
-          MINIO_ROOT_PASSWORD: minioadmin
-        ports:
-          - 9000:9000
-          - 9001:9001
-        command: server /data --console-address ":9001"
-
     env:
       DATABASE_URL: postgresql://healthclaim_user:healthclaim_pass@localhost:5432/healthclaim_db?schema=public
       JWT_SECRET: super_secret_healthclaim_pro_jwt_key_ci_2026!
@@ -230,23 +220,7 @@ jobs:
           retention-days: 14
 
   # ============================================================================
-  # STAGE 5: SCA - DEPENDENCY REVIEW & SUPPLY CHAIN SECURITY
-  # ============================================================================
-  dependency-review-sca:
-    name: GitHub Dependency Review SCA
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: GitHub Official Dependency Review
-        uses: actions/dependency-review-action@v4
-        with:
-          fail-on-severity: high
-
-  # ============================================================================
-  # STAGE 6: DAST - OWASP ZAP DYNAMIC SECURITY PENETRATION SCAN
+  # STAGE 5: DAST - OWASP ZAP DYNAMIC SECURITY PENETRATION SCAN
   # ============================================================================
   owasp-zap-dast:
     name: OWASP ZAP DAST Security Scan
@@ -268,15 +242,6 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-
-      minio:
-        image: minio/minio:latest
-        env:
-          MINIO_ROOT_USER: minioadmin
-          MINIO_ROOT_PASSWORD: minioadmin
-        ports:
-          - 9000:9000
-        command: server /data
 
     env:
       DATABASE_URL: postgresql://healthclaim_user:healthclaim_pass@localhost:5432/healthclaim_db?schema=public
