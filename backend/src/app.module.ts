@@ -13,6 +13,7 @@ import { StorageModule } from './storage/storage.module';
 import { DepartmentsModule } from './departments/departments.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { HealthModule } from './health/health.module';
+import { MailModule } from './common/mail/mail.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { HealthModule } from './health/health.module';
       envFilePath: ['.env', '../.env'],
     }),
     EventEmitterModule.forRoot(),
+    MailModule,
     PrismaModule,
     AuditModule,
     AuthModule,

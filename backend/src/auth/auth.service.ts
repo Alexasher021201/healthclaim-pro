@@ -1,7 +1,8 @@
-import { Injectable, UnauthorizedException, BadRequestException, ConflictException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, BadRequestException, ConflictException, Optional } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
+import { MailService } from '../common/mail/mail.service';
 import { LoginRequest, RegisterRequest, AuthResponse, UserRole, UserStatus } from '@healthclaim/shared';
 
 @Injectable()
@@ -9,6 +10,7 @@ export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
+    @Optional() private readonly mailService?: MailService,
   ) {}
 
   /**
@@ -166,10 +168,14 @@ export class AuthService {
       },
     });
 
-    // Log the simulation link for development
-    console.log(`[EMAIL_VERIFICATION_TODO] Verification link for ${user.email}: http://localhost:5173/verify-email?token=${token}`);
+    // Dispatch email verification link via Resend
+    if (this.mailService) {
+      await this.mailService.sendVerificationEmail(user.email, token, user.firstName);
+    } else {
+      console.log(`[EMAIL_VERIFICATION_SIMULATION] Verification link for ${user.email}: https://healthclaim.pro/verify-email?token=${token}`);
+    }
 
-    return { message: 'Verification email sent successfully (check console in development)' };
+    return { message: 'Verification email sent successfully' };
   }
 
   /**

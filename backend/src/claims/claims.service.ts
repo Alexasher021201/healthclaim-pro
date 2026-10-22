@@ -4,6 +4,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Logger,
+  Optional,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RuleEngineService } from '../rules/rules.service';
@@ -11,6 +12,7 @@ import { ActuarialService } from '../actuarial/actuarial.service';
 import { AuditService } from '../audit/audit.service';
 import { StorageService } from '../storage/storage.service';
 import { ClaimStateMachine } from './state-machine/claim-state-machine';
+import { MailService } from '../common/mail/mail.service';
 import {
   CreateClaimRequest,
   ClaimResponseDto,
@@ -30,6 +32,7 @@ export class ClaimsService {
     private readonly auditService: AuditService,
     private readonly storageService: StorageService,
     private readonly stateMachine: ClaimStateMachine,
+    @Optional() private readonly mailService?: MailService,
   ) {}
 
   /**
@@ -319,6 +322,44 @@ export class ClaimsService {
 
       return transitioned;
     });
+
+    // Asynchronous transactional notification email dispatch
+    if (this.mailService && claim.user?.email) {
+      const claimantName = `${claim.user.firstName || ''} ${claim.user.lastName || ''}`.trim() || 'Valued Member';
+      if (
+        targetStatus === ClaimStatus.SETTLED ||
+        targetStatus === ClaimStatus.FINANCE_APPROVED ||
+        targetStatus === ClaimStatus.OFFICER_APPROVED
+      ) {
+        this.mailService
+          .sendSettlementVoucherEmail({
+            claimId: claim.id,
+            claimNumber: claim.claimNumber,
+            claimantName,
+            claimantEmail: claim.user.email,
+            approvedAmount: Number(claim.approvedAmount || claim.totalAmount),
+            settlementReference: `SETTLE-${claim.claimNumber}`,
+            payoutMethod: 'Direct Bank Disbursement',
+            settledAt: new Date().toISOString(),
+            issuerSignature: `HEALTHCLAIM-PRO-SEAL-${Buffer.from(claim.claimNumber).toString('base64').substring(0, 16)}`,
+          })
+          .catch((err) => this.logger.error(`Settlement email dispatch error: ${err.message}`));
+      } else if (
+        targetStatus === ClaimStatus.OFFICER_REJECTED ||
+        targetStatus === ClaimStatus.CANCELLED
+      ) {
+        this.mailService
+          .sendClaimStatusEmail({
+            claimNumber: claim.claimNumber,
+            claimantName,
+            claimantEmail: claim.user.email,
+            status: targetStatus,
+            amount: Number(claim.totalAmount),
+            reason,
+          })
+          .catch((err) => this.logger.error(`Claim rejection email dispatch error: ${err.message}`));
+      }
+    }
 
     return this.mapToDto(updatedClaim);
   }
