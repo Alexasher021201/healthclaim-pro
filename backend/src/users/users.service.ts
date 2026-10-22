@@ -4,9 +4,11 @@ import {
   BadRequestException,
   ConflictException,
   UnauthorizedException,
+  Optional,
 } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
+import { MailService } from '../common/mail/mail.service';
 import {
   UserRole,
   UserStatus,
@@ -19,7 +21,10 @@ import {
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly mailService?: MailService,
+  ) {}
 
   /**
    * Get authenticated user profile with active quota details
@@ -101,14 +106,18 @@ export class UsersService {
     if (dto.lastName) updateData.lastName = dto.lastName.trim();
     if (dto.department !== undefined) updateData.department = dto.department?.trim() || null;
 
+    let emailChanged = false;
+    let targetEmail: string | undefined;
+
     if (dto.email && dto.email.toLowerCase().trim() !== user.email) {
-      const targetEmail = dto.email.toLowerCase().trim();
+      targetEmail = dto.email.toLowerCase().trim();
       const emailConflict = await this.prisma.user.findUnique({ where: { email: targetEmail } });
       if (emailConflict) {
         throw new ConflictException('An account with this email address already exists');
       }
       updateData.email = targetEmail;
       updateData.isEmailVerified = false; // Reset verification if email changes
+      emailChanged = true;
     }
 
     // Password change verification
@@ -127,6 +136,42 @@ export class UsersService {
       where: { id: userId },
       data: updateData,
     });
+
+    // If email changed, automatically issue a new verification token and send verification email
+    if (emailChanged && targetEmail) {
+      const token = Math.random().toString(36).substring(2) + Date.now().toString(36);
+      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+
+      if (this.prisma.verificationToken?.deleteMany) {
+        await this.prisma.verificationToken.deleteMany({
+          where: { email: targetEmail },
+        });
+      }
+
+      if (this.prisma.verificationToken?.create) {
+        await this.prisma.verificationToken.create({
+          data: {
+            email: targetEmail,
+            token,
+            expiresAt,
+          },
+        });
+      }
+
+      if (this.mailService) {
+        try {
+          await this.mailService.sendVerificationEmail(
+            targetEmail,
+            token,
+            updatedUser.firstName || user.firstName,
+          );
+        } catch (e: any) {
+          console.warn(`[UsersService] Failed to send verification email to ${targetEmail}: ${e.message}`);
+        }
+      } else {
+        console.log(`[EMAIL_VERIFICATION_SIMULATION] Verification link for ${targetEmail}: https://healthclaim.pro/verify-email?token=${token}`);
+      }
+    }
 
     await this.prisma.auditLog.create({
       data: {

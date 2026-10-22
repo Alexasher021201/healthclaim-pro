@@ -58,6 +58,11 @@ export class AuthController {
     return this.authService.sendVerificationEmail(user.id);
   }
 
+  @Post('resend-verification')
+  async resendVerification(@Body('email') email: string) {
+    return this.authService.resendVerificationByEmail(email || '');
+  }
+
   /**
    * TODO: Reserved for future Email Verification module
    */

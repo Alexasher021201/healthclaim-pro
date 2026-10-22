@@ -110,7 +110,25 @@ export const LoginPage: React.FC<LoginPageProps> = ({ defaultTab }) => {
         setPassword('');
       }
     } catch (err: any) {
-      toast.error(err.message || 'Authentication failed. Please check credentials.');
+      const errMsg = err.message || 'Authentication failed. Please check credentials.';
+      if (errMsg.toLowerCase().includes('verify your email')) {
+        toast.error(errMsg, {
+          duration: 10000,
+          action: {
+            label: 'Resend Link',
+            onClick: async () => {
+              try {
+                const res = await apiClient.post<any, { message: string }>('/auth/resend-verification', { email });
+                toast.success(res.message || 'Verification link resent to your email.');
+              } catch (e: any) {
+                toast.error(e.message || 'Failed to resend verification email');
+              }
+            },
+          },
+        });
+      } else {
+        toast.error(errMsg);
+      }
     } finally {
       setLoading(false);
     }

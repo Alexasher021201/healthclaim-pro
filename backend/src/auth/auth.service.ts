@@ -198,6 +198,22 @@ export class AuthService {
   }
 
   /**
+   * Resends email verification link by email address without requiring active authentication session
+   */
+  async resendVerificationByEmail(email: string): Promise<{ message: string }> {
+    const user = await this.prisma.user.findUnique({
+      where: { email: email.toLowerCase().trim() },
+    });
+    if (!user) {
+      return { message: 'If an account exists with this email address, a verification link has been sent.' };
+    }
+    if (user.isEmailVerified) {
+      return { message: 'Your email address is already verified. You can sign in directly.' };
+    }
+    return this.sendVerificationEmail(user.id);
+  }
+
+  /**
    * TODO: Reserved for future Email Verification module
    * Verifies the email token and marks user as verified
    */

@@ -86,6 +86,7 @@ export const SettingsPage: React.FC = () => {
 
     setSavingProfile(true);
     try {
+      const isEmailChanged = Boolean(user?.email && email.trim().toLowerCase() !== user.email.toLowerCase());
       await apiClient.patch('/users/me', {
         firstName: firstName.trim(),
         lastName: lastName.trim(),
@@ -94,7 +95,14 @@ export const SettingsPage: React.FC = () => {
       });
 
       await refreshProfile();
-      toast.success('Account profile updated successfully');
+      if (isEmailChanged) {
+        toast.success(
+          `Profile updated! A verification link has been sent to ${email.trim()}. Please check your inbox to verify your new address.`,
+          { duration: 7000 },
+        );
+      } else {
+        toast.success('Account profile updated successfully');
+      }
     } catch (err: any) {
       toast.error(err.message || 'Failed to update profile');
     } finally {
@@ -215,7 +223,7 @@ export const SettingsPage: React.FC = () => {
                         disabled={sendingVerification}
                         className="text-[10px] text-blue-600 hover:underline font-medium cursor-pointer"
                       >
-                        {sendingVerification ? 'Sending...' : 'Send Link'}
+                        {sendingVerification ? 'Sending...' : 'Resend Link'}
                       </button>
                     </div>
                   )}

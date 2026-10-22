@@ -6,8 +6,13 @@ import { NotFoundException, BadRequestException, ConflictException } from '@nest
 describe('UsersService (TDD)', () => {
   let service: UsersService;
   let mockPrismaService: any;
+  let mockMailService: any;
 
   beforeEach(() => {
+    mockMailService = {
+      sendVerificationEmail: vi.fn().mockResolvedValue({ success: true }),
+    };
+
     mockPrismaService = {
       user: {
         findUnique: vi.fn(),
@@ -15,6 +20,10 @@ describe('UsersService (TDD)', () => {
         count: vi.fn(),
         update: vi.fn(),
         create: vi.fn(),
+      },
+      verificationToken: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+        create: vi.fn().mockResolvedValue({ id: 'tok-1' }),
       },
       benefitTier: {
         findFirst: vi.fn(),
@@ -28,7 +37,7 @@ describe('UsersService (TDD)', () => {
       },
     };
 
-    service = new UsersService(mockPrismaService);
+    service = new UsersService(mockPrismaService, mockMailService);
   });
 
   describe('getCurrentUserProfile', () => {
@@ -304,6 +313,63 @@ describe('UsersService (TDD)', () => {
       );
       expect(mockPrismaService.auditLog.create).toHaveBeenCalled();
       expect(updated.firstName).toBe('New');
+    });
+
+    it('should reset isEmailVerified and auto-send verification email when email changes', async () => {
+      mockPrismaService.user.findUnique
+        .mockResolvedValueOnce({
+          id: 'usr-1',
+          email: 'old@test.com',
+          firstName: 'Alice',
+          lastName: 'Smith',
+        })
+        .mockResolvedValueOnce(null) // no email conflict
+        .mockResolvedValueOnce({
+          id: 'usr-1',
+          email: 'new@test.com',
+          firstName: 'Alice',
+          lastName: 'Smith',
+          role: UserRole.EMPLOYEE,
+          status: UserStatus.ACTIVE,
+          department: 'Engineering',
+          isEmailVerified: false,
+          quotas: [],
+        });
+
+      mockPrismaService.user.update.mockResolvedValue({
+        id: 'usr-1',
+        email: 'new@test.com',
+        firstName: 'Alice',
+        isEmailVerified: false,
+      });
+
+      const updated = await service.updateMyProfile('usr-1', {
+        email: 'new@test.com',
+      });
+
+      expect(mockPrismaService.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'usr-1' },
+          data: expect.objectContaining({
+            email: 'new@test.com',
+            isEmailVerified: false,
+          }),
+        }),
+      );
+      expect(mockPrismaService.verificationToken.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            email: 'new@test.com',
+          }),
+        }),
+      );
+      expect(mockMailService.sendVerificationEmail).toHaveBeenCalledWith(
+        'new@test.com',
+        expect.any(String),
+        'Alice',
+      );
+      expect(updated.isEmailVerified).toBe(false);
+      expect(updated.email).toBe('new@test.com');
     });
   });
 

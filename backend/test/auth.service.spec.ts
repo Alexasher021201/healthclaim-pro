@@ -252,5 +252,28 @@ describe('AuthService (TDD)', () => {
         BadRequestException,
       );
     });
+
+    it('should resend verification link by email for unverified user', async () => {
+      mockPrismaService.user.findUnique.mockResolvedValue({
+        id: 'usr-resend',
+        email: 'resend@healthclaim.pro',
+        firstName: 'Resend',
+        isEmailVerified: false,
+      });
+      mockPrismaService.verificationToken.create.mockResolvedValue({
+        id: 'tok-resend',
+        token: 'sample-resend-tok',
+      });
+
+      const res = await authService.resendVerificationByEmail('resend@healthclaim.pro');
+      expect(res.message).toContain('Verification email sent');
+    });
+
+    it('should return safe message when email is not found to prevent user enumeration', async () => {
+      mockPrismaService.user.findUnique.mockResolvedValue(null);
+
+      const res = await authService.resendVerificationByEmail('nonexistent@healthclaim.pro');
+      expect(res.message).toContain('If an account exists');
+    });
   });
 });
