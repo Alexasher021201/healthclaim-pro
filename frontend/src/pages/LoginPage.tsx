@@ -92,6 +92,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ defaultTab }) => {
       if (activeTab === 'login') {
         await login({ email, password });
         toast.success('Welcome back to HealthClaim Pro');
+        navigate('/dashboard');
       } else {
         await register({
           email,
@@ -101,9 +102,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ defaultTab }) => {
           department: department || undefined,
           role,
         });
-        toast.success('Account created successfully');
+        toast.success(
+          'Account created! A verification link has been sent to your email. Please verify before signing in.',
+          { duration: 7000 },
+        );
+        setActiveTab('login');
+        setPassword('');
       }
-      navigate('/dashboard');
     } catch (err: any) {
       toast.error(err.message || 'Authentication failed. Please check credentials.');
     } finally {

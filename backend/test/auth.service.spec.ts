@@ -122,6 +122,26 @@ describe('AuthService (TDD)', () => {
         }),
       ).rejects.toThrow(UnauthorizedException);
     });
+
+    it('should reject unverified user account with UnauthorizedException', async () => {
+      const plainPassword = 'Password123!';
+      const hashedPassword = await bcrypt.hash(plainPassword, 10);
+
+      mockPrismaService.user.findUnique.mockResolvedValue({
+        id: 'usr-unverified',
+        email: 'unverified@healthclaim.pro',
+        passwordHash: hashedPassword,
+        status: UserStatus.ACTIVE,
+        isEmailVerified: false,
+      });
+
+      await expect(
+        authService.login({
+          email: 'unverified@healthclaim.pro',
+          password: plainPassword,
+        }),
+      ).rejects.toThrow('Please verify your email address before logging in');
+    });
   });
 
   describe('register', () => {

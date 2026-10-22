@@ -111,14 +111,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const register = async (data: RegisterRequest) => {
     setIsLoading(true);
     try {
-      const response = await apiClient.post<any, { accessToken: string; user: any }>(
+      await apiClient.post<any, { accessToken: string; user: any }>(
         '/auth/register',
         data,
       );
-      const authToken = response.accessToken;
-      localStorage.setItem('healthclaim_token', authToken);
-      setToken(authToken);
-      await refreshProfile();
     } finally {
       setIsLoading(false);
     }
