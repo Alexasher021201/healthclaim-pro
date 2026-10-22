@@ -376,7 +376,13 @@ jobs:
           CMD_ID=$(aws ssm send-command \
             --instance-ids "$INSTANCE_ID" \
             --document-name "AWS-RunShellScript" \
-            --parameters 'commands=["/usr/local/bin/deploy-bluegreen.sh"]' \
+            --parameters 'commands=[
+              "export DATABASE_URL=\"${{ secrets.DATABASE_URL }}\"",
+              "export JWT_SECRET=\"${{ secrets.JWT_SECRET }}\"",
+              "export MASTER_ENCRYPTION_KEY=\"${{ secrets.MASTER_ENCRYPTION_KEY }}\"",
+              "export RESEND_API_KEY=\"${{ secrets.RESEND_API_KEY }}\"",
+              "/usr/local/bin/deploy-bluegreen.sh"
+            ]' \
             --comment "Automated Zero-Downtime Blue/Green Switch" \
             --region "${{ env.AWS_REGION }}" \
             --query "Command.CommandId" \
