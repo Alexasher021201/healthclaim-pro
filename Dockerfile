@@ -61,9 +61,9 @@ RUN chown -R nestjs:nodejs /app
 USER nestjs
 WORKDIR /app/backend
 
-EXPOSE 3000
+EXPOSE 4000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/api/v1/health || exit 1
+  CMD wget --no-verbose --tries=1 --spider http://localhost:4000/api/v1/health || exit 1
 
 CMD ["node", "dist/main.js"]

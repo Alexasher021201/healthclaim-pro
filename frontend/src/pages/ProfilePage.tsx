@@ -29,7 +29,7 @@ export const ProfilePage: React.FC = () => {
     setSendingVerification(true);
     try {
       const res = await apiClient.post<any, { message: string }>('/auth/send-verification-email');
-      toast.success(res.message || 'Verification link generated (check server console in development)');
+      toast.success(res.message || 'Verification email sent. Please check your inbox.');
     } catch (err: any) {
       toast.error(err.message || 'Failed to send verification email');
     } finally {

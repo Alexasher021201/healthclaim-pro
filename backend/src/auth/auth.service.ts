@@ -124,6 +124,14 @@ export class AuthService {
       },
     });
 
+    // Automatically send verification email on registration
+    try {
+      await this.sendVerificationEmail(user.id);
+    } catch (e: any) {
+      // Do not block registration if email delivery encounters transient issues
+      console.warn(`[AuthService] Non-blocking email dispatch warning: ${e.message}`);
+    }
+
     const payload = { sub: user.id, email: user.email, role: user.role };
     const accessToken = this.jwtService.sign(payload);
 
@@ -159,6 +167,13 @@ export class AuthService {
     // Generate token placeholder
     const token = Math.random().toString(36).substring(2) + Date.now().toString(36);
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+
+    // Clean up any stale verification tokens for this email address
+    if (this.prisma.verificationToken?.deleteMany) {
+      await this.prisma.verificationToken.deleteMany({
+        where: { email: user.email },
+      });
+    }
 
     await this.prisma.verificationToken.create({
       data: {

@@ -263,6 +263,23 @@ export class ClaimsService {
       ipAddress,
     });
 
+    // Asynchronous transactional notification email dispatch upon claim submission
+    if (this.mailService && claim.user?.email) {
+      const claimantName = `${claim.user.firstName || ''} ${claim.user.lastName || ''}`.trim() || 'Valued Member';
+      this.mailService
+        .sendClaimStatusEmail({
+          claimNumber: claim.claimNumber,
+          claimantName,
+          claimantEmail: claim.user.email,
+          status: initialStatus,
+          amount: Number(claim.totalAmount),
+          reason: ruleEvaluation.allPassed
+            ? 'All adjudication rules verified. Awaiting officer endorsement.'
+            : 'Certain automated rules flagged warnings. Manual officer inspection scheduled.',
+        })
+        .catch((err) => this.logger.error(`Claim submission email dispatch error: ${err.message}`));
+    }
+
     return this.mapToDto(claim);
   }
 
@@ -346,7 +363,8 @@ export class ClaimsService {
           .catch((err) => this.logger.error(`Settlement email dispatch error: ${err.message}`));
       } else if (
         targetStatus === ClaimStatus.OFFICER_REJECTED ||
-        targetStatus === ClaimStatus.CANCELLED
+        targetStatus === ClaimStatus.CANCELLED ||
+        targetStatus === ClaimStatus.FLAGGED_REVIEW
       ) {
         this.mailService
           .sendClaimStatusEmail({

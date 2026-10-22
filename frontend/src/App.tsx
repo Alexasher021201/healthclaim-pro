@@ -15,6 +15,7 @@ import { ProfilePage } from './pages/ProfilePage';
 import { SettingsPage } from './pages/SettingsPage';
 import { AuditLogsPage } from './pages/AuditLogsPage';
 import { UnauthorizedPage } from './pages/UnauthorizedPage';
+import { VerifyEmailPage } from './pages/VerifyEmailPage';
 import { UserRole } from '@healthclaim/shared';
 import { Toaster } from './components/ui/sonner';
 
@@ -23,8 +24,10 @@ export const App: React.FC = () => {
     <AuthProvider>
       <BrowserRouter>
         <Routes>
-          {/* Public Auth Route */}
-          <Route path="/login" element={<LoginPage />} />
+          {/* Public Auth Routes */}
+          <Route path="/login" element={<LoginPage defaultTab="login" />} />
+          <Route path="/register" element={<LoginPage defaultTab="register" />} />
+          <Route path="/verify-email" element={<VerifyEmailPage />} />
           <Route path="/unauthorized" element={<UnauthorizedPage />} />
 
           {/* Protected Application Routes */}

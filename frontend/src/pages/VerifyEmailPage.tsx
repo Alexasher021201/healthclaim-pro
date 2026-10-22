@@ -1,0 +1,92 @@
+import React, { useEffect, useState } from 'react';
+import { useSearchParams, useNavigate, Link } from 'react-router-dom';
+import { apiClient } from '../api/client';
+import { CheckCircle2, XCircle, Loader2, ArrowRight } from 'lucide-react';
+import { BRAND_CONFIG } from '../config/branding';
+
+export const VerifyEmailPage: React.FC = () => {
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const token = searchParams.get('token');
+
+  const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
+  const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    if (!token) {
+      setStatus('error');
+      setMessage('Missing or invalid verification token.');
+      return;
+    }
+
+    const verify = async () => {
+      try {
+        const res = await apiClient.get<any, { message: string }>(`/auth/verify-email?token=${token}`);
+        setStatus('success');
+        setMessage(res.message || 'Your email address has been successfully verified.');
+      } catch (err: any) {
+        setStatus('error');
+        setMessage(err.message || 'Verification link is invalid or has expired.');
+      }
+    };
+
+    verify();
+  }, [token]);
+
+  return (
+    <div className="min-h-screen bg-slate-50/70 flex flex-col justify-center py-10 px-4 sm:px-6 lg:px-8">
+      <div className="sm:mx-auto sm:w-full sm:max-w-[420px]">
+        <div className="flex flex-col items-center justify-center mb-6 text-center">
+          <img
+            src={BRAND_CONFIG.logoUrl}
+            alt={BRAND_CONFIG.fullName}
+            className="h-14 w-auto object-contain"
+          />
+        </div>
+
+        <div className="bg-white p-8 border border-slate-200/80 rounded-2xl shadow-sm text-center">
+          {status === 'loading' && (
+            <div className="py-8 flex flex-col items-center">
+              <Loader2 className="h-10 w-10 text-primary animate-spin mb-4" />
+              <h2 className="text-base font-bold text-slate-800">Verifying Email...</h2>
+              <p className="text-xs text-slate-500 mt-1">Please wait while we validate your activation token.</p>
+            </div>
+          )}
+
+          {status === 'success' && (
+            <div className="py-6 flex flex-col items-center">
+              <div className="h-14 w-14 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mb-4">
+                <CheckCircle2 className="h-8 w-8" />
+              </div>
+              <h2 className="text-lg font-bold text-slate-900">Email Verified!</h2>
+              <p className="text-xs text-slate-600 mt-2 max-w-xs">{message}</p>
+              <button
+                onClick={() => navigate('/login')}
+                className="mt-6 w-full py-2.5 px-4 bg-[#0a2540] hover:bg-[#081e35] text-white rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition"
+              >
+                <span>Continue to Sign In</span>
+                <ArrowRight className="h-4 w-4" />
+              </button>
+            </div>
+          )}
+
+          {status === 'error' && (
+            <div className="py-6 flex flex-col items-center">
+              <div className="h-14 w-14 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center mb-4">
+                <XCircle className="h-8 w-8" />
+              </div>
+              <h2 className="text-lg font-bold text-slate-900">Verification Failed</h2>
+              <p className="text-xs text-rose-600 mt-2 max-w-xs">{message}</p>
+              <Link
+                to="/login"
+                className="mt-6 inline-block text-xs font-bold text-[#0a2540] hover:underline"
+              >
+                Back to Sign In
+              </Link>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
